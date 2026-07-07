@@ -3,7 +3,8 @@ from telebot import types
 import sqlite3
 import threading
 
-TOKEN = "YOUR_BOT_TOKEN_HERE"  # <-- put your token in an env var, not in source. See note at bottom.
+TOKEN = "8876721186:AAHYUDK9v_iKYmI5rl_ZktglJrBBYMQIbHI
+"  # <-- put your token in an env var, not in source. See note at bottom.
 bot = telebot.TeleBot(TOKEN)
 
 local = threading.local()
