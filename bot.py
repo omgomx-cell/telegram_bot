@@ -13,17 +13,15 @@ def get_db():
         local.conn = sqlite3.connect('users.db', check_same_thread=False, timeout=15)
         local.cursor = local.conn.cursor()
         local.cursor.execute('''CREATE TABLE IF NOT EXISTS users
-            (user_id INTEGER PRIMARY KEY, username TEXT, country TEXT, 
-             state TEXT, gender TEXT, age INTEGER, partner INTEGER)''')
+            (user_id INTEGER PRIMARY KEY, username TEXT, country TEXT, state TEXT, gender TEXT, age INTEGER, partner INTEGER)''')
         local.conn.commit()
     return local.conn, local.cursor
 
 waiting_users = []
 
-INDIAN_STATES = ["Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka", "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram", "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu", "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal", "Delhi", "Jammu and Kashmir", "Ladakh", "Puducherry", "Other State"]
-
+# Keyboards (same as before)
 COMMON_COUNTRIES = ["United States", "India", "United Kingdom", "Canada", "Australia", "Germany", "France", "Japan", "Brazil", "Russia", "China", "Mexico", "Italy", "Spain", "South Korea", "Nigeria", "Turkey", "Other"]
-
+INDIAN_STATES = ["Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka", "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram", "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu", "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal", "Delhi", "Jammu and Kashmir", "Ladakh", "Puducherry", "Other State"]
 AGE_RANGES = ["13-17", "18-20", "21-24", "25-30", "31-40", "41-50", "51+"]
 
 def get_country_keyboard():
@@ -51,7 +49,6 @@ def get_age_keyboard():
 @bot.message_handler(commands=['start'])
 def start(message):
     bot.send_message(message.chat.id, "👋 Welcome! Select your country:", reply_markup=get_country_keyboard())
-    bot.register_next_step_handler(message, process_country)
 
 def process_country(message):
     country = message.text.strip() if message.text else ""
@@ -59,7 +56,7 @@ def process_country(message):
         bot.send_message(message.chat.id, "🇮🇳 Select your State:", reply_markup=get_indian_states_keyboard())
         bot.register_next_step_handler(message, process_state, country)
     elif country == "Other":
-        bot.send_message(message.chat.id, "🌍 Enter your country name:")
+        bot.send_message(message.chat.id, "🌍 Enter your country:")
         bot.register_next_step_handler(message, process_custom_country)
     else:
         ask_state(message, country)
@@ -69,24 +66,23 @@ def process_custom_country(message):
     ask_state(message, country)
 
 def ask_state(message, country):
-    bot.send_message(message.chat.id, f"📍 Enter your State/Region:\nCountry: <b>{country}</b>", parse_mode='HTML', reply_markup=types.ReplyKeyboardRemove())
+    bot.send_message(message.chat.id, f"📍 Enter State/Region:\nCountry: <b>{country}</b>", parse_mode='HTML', reply_markup=types.ReplyKeyboardRemove())
     bot.register_next_step_handler(message, process_state, country)
 
 def process_state(message, country):
     state = message.text.strip().title() if message.text else ""
-    bot.send_message(message.chat.id, "⚧ Select your Gender:", reply_markup=get_gender_keyboard())
+    bot.send_message(message.chat.id, "⚧ Select Gender:", reply_markup=get_gender_keyboard())
     bot.register_next_step_handler(message, process_gender, country, state)
 
 def process_gender(message, country, state):
     gender = message.text.capitalize() if message.text else "Other"
-    bot.send_message(message.chat.id, "🎂 Select your Age:", reply_markup=get_age_keyboard())
+    bot.send_message(message.chat.id, "🎂 Select Age:", reply_markup=get_age_keyboard())
     bot.register_next_step_handler(message, process_age, country, state, gender)
 
-# Age and save functions (same as before)
 def process_age(message, country, state, gender):
     age_text = message.text.strip() if message.text else ""
     if age_text == "Custom Age":
-        bot.send_message(message.chat.id, "Enter your exact age (13-100):")
+        bot.send_message(message.chat.id, "Enter exact age (13-100):")
         bot.register_next_step_handler(message, process_custom_age, country, state, gender)
         return
     try:
@@ -101,7 +97,7 @@ def process_age(message, country, state, gender):
         else:
             raise ValueError
     except:
-        bot.send_message(message.chat.id, "❌ Invalid age.")
+        bot.send_message(message.chat.id, "❌ Invalid age. Please try again.")
         bot.register_next_step_handler(message, process_age, country, state, gender)
 
 def process_custom_age(message, country, state, gender):
@@ -112,7 +108,7 @@ def process_custom_age(message, country, state, gender):
         else:
             raise ValueError
     except:
-        bot.send_message(message.chat.id, "❌ Enter valid age (13-100)")
+        bot.send_message(message.chat.id, "❌ Invalid number.")
         bot.register_next_step_handler(message, process_custom_age, country, state, gender)
 
 def save_user_profile(message, country, state, gender, age):
@@ -121,11 +117,11 @@ def save_user_profile(message, country, state, gender, age):
         cursor.execute('''INSERT OR REPLACE INTO users (user_id, username, country, state, gender, age, partner)
                          VALUES (?,?,?,?,?,?,NULL)''', (message.from_user.id, message.from_user.username, country, state, gender, age))
         conn.commit()
-        bot.send_message(message.chat.id, "✅ Profile Saved!\nUse /help", reply_markup=types.ReplyKeyboardRemove())
+        bot.send_message(message.chat.id, "✅ Profile Saved!\n\nUse /help", reply_markup=types.ReplyKeyboardRemove())
     except:
-        bot.send_message(message.chat.id, "❌ Error.")
+        bot.send_message(message.chat.id, "❌ Error saving profile.")
 
-# Other commands (help, check, find, end, relay) remain the same as previous version
+# Add other commands (/help, /check, /find, /end, relay) as before...
 
-print("🤖 Bot Started (Fixed duplicate messages)")
+print("🤖 Bot Started - Fixed loop issue")
 bot.infinity_polling()
