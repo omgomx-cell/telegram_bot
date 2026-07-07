@@ -2,8 +2,16 @@ import telebot
 from telebot import types
 import sqlite3
 import threading
+import os
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
-TOKEN = "8876721186:AAHYUDK9v_iKYmI5rl_ZktglJrBBYMQIbHI"  # <-- put your token in an env var, not in source. See note at bottom.
+TOKEN = os.environ.get("8876721186:AAFLAng8Eyp3BUaAKzb5R1fYlL4mtVNVn0U")
+if not TOKEN:
+    raise RuntimeError(
+        "BOT_TOKEN environment variable is not set. "
+        "Set it in Render: Dashboard -> your service -> Environment -> Add Environment Variable "
+        "(key: BOT_TOKEN, value: your token from @BotFather)."
+    )
 bot = telebot.TeleBot(TOKEN)
 
 local = threading.local()
@@ -36,7 +44,7 @@ INDIAN_STATES = ["Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhat
                   "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
                   "Delhi", "Jammu and Kashmir", "Ladakh", "Puducherry", "Other State"]
 
-# 18+ only. See note at bottom of file re: why 13-17 was removed.
+# 18+ only.
 AGE_RANGES = ["18-20", "21-24", "25-30", "31-40", "41-50", "51+"]
 
 def get_country_keyboard():
@@ -328,6 +336,27 @@ def relay_message(message):
     except Exception as e:
         bot.send_message(message.chat.id, "⚠️ Couldn't deliver your message. Your partner may have blocked the bot.")
         print(f"Relay error: {e}")
+
+# ---------------- Dummy web server for Render free tier ----------------
+# Render's free "Web Service" plan requires an open port to health-check;
+# a polling bot doesn't normally open one, so we spin up a trivial HTTP
+# server just to satisfy that check. It does nothing else.
+
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is running")
+
+    def log_message(self, format, *args):
+        pass  # silence default request logging
+
+def run_health_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+    server.serve_forever()
+
+threading.Thread(target=run_health_server, daemon=True).start()
 
 # Registers the "/" command menu Telegram shows in the chat UI, so users
 # can tap "/" and see + pick every available command, or just type it manually.
