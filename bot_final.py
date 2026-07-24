@@ -1,81 +1,104 @@
-import os
-import time
-import asyncio
-import logging
-import threading
+import os, time, asyncio, logging, threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.constants import ChatAction
 import requests
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
+logging.basicConfig(level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s")
 
-# ---- Health-check server so Render keeps the port alive ----
-class HealthHandler(BaseHTTPRequestHandler):
+TMDB_KEY = os.environ["TMDB_API_KEY"]        # free from themoviedb.org
+TMDB = "https://api.themoviedb.org/3"
+IMG = "https://image.tmdb.org/t/p/w500"
+
+# ---- health server for Render ----
+class H(BaseHTTPRequestHandler):
     def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK - bot is running")
-    def log_message(self, *args):
-        pass
+        self.send_response(200); self.end_headers()
+        self.wfile.write(b"OK")
+    def log_message(self, *a): pass
+def health():
+    HTTPServer(("0.0.0.0", int(os.environ.get("PORT", 10000))), H).serve_forever()
 
-def run_health_server():
-    port = int(os.environ.get("PORT", 10000))
-    HTTPServer(("0.0.0.0", port), HealthHandler).serve_forever()
+# ---- TMDB helpers ----
+def search_movie(q):
+    r = requests.get(f"{TMDB}/search/movie",
+        params={"api_key": TMDB_KEY, "query": q}, timeout=15)
+    r.raise_for_status()
+    return r.json().get("results", [])[:1]
 
-# ---- Bot handlers ----
-async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🎬 Welcome to the Public-Domain Movie Bot!\n\n"
-        "Send /find <title> to search thousands of free, legal films "
-        "from the Internet Archive.\n\n"
-        "Example: /find charlie chaplin"
-    )
+def watch_providers(movie_id, region="US"):
+    r = requests.get(f"{TMDB}/movie/{movie_id}/watch/providers",
+        params={"api_key": TMDB_KEY}, timeout=15)
+    r.raise_for_status()
+    return r.json().get("results", {}).get(region, {})
 
-async def find(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not ctx.args:
-        return await update.message.reply_text("Usage: /find <title>\nExample: /find night of the living dead")
-    query = " ".join(ctx.args)
+# ---- handlers ----
+async def start(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    await u.message.reply_text(
+        "🎬 *Where-To-Watch Bot*\n\n"
+        "Send /find <movie> and I'll find where to legally watch it "
+        "in high quality — free & paid options.\n\n"
+        "Try: `/find interstellar`", parse_mode="Markdown")
+
+async def find(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    if not c.args:
+        return await u.message.reply_text("Usage: /find <movie name>")
+    query = " ".join(c.args)
+    await c.bot.send_chat_action(u.message.chat_id, ChatAction.TYPING)
     try:
-        r = await asyncio.to_thread(
-            requests.get, "https://archive.org/advancedsearch.php",
-            params={
-                "q": f'title:({query}) AND mediatype:(movies)',
-                "fl[]": "identifier,title", "rows": 5, "output": "json"
-            }, timeout=15
-        )
-        r.raise_for_status()
-        docs = r.json()["response"]["docs"]
+        results = await asyncio.to_thread(search_movie, query)
+        if not results:
+            return await u.message.reply_text("😕 Movie not found. Check the spelling?")
+        m = results[0]
+        prov = await asyncio.to_thread(watch_providers, m["id"])
     except Exception as e:
-        logging.error(f"Search error: {e}")
-        return await update.message.reply_text("⚠️ Search failed, please try again in a moment.")
+        logging.error(e)
+        return await u.message.reply_text("⚠️ Something went wrong, try again.")
 
-    if not docs:
-        return await update.message.reply_text("😕 No public-domain matches found. Try a different title.")
+    title = m.get("title", "Unknown")
+    year = (m.get("release_date") or "----")[:4]
+    rating = m.get("vote_average", 0)
+    overview = (m.get("overview") or "No synopsis available.")[:400]
 
-    buttons = [[InlineKeyboardButton(d.get("title", "Untitled")[:40],
-               url=f"https://archive.org/details/{d['identifier']}")] for d in docs]
-    await update.message.reply_text(
-        f"🎬 Found {len(docs)} free & legal result(s) for “{query}”:",
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
+    # collect legal watch options
+    options = []
+    for kind, label in [("flatrate", "▶️ Stream"), ("free", "🆓 Free"),
+                        ("rent", "💵 Rent"), ("buy", "🛒 Buy")]:
+        for p in prov.get(kind, []):
+            options.append(f"{label}: {p['provider_name']}")
+    link = prov.get("link")  # JustWatch page with all HD sources
 
-# ---- Main with auto-restart ----
+    caption = (f"🎬 *{title}* ({year})\n"
+               f"⭐ {rating}/10\n\n"
+               f"{overview}\n\n")
+    if options:
+        caption += "*Where to watch (HD):*\n" + "\n".join(f"• {o}" for o in options[:8])
+    else:
+        caption += "_No streaming providers listed for your region._"
+
+    kb = None
+    if link:
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 All HD watch links", url=link)]])
+
+    poster = m.get("poster_path")
+    if poster:
+        await u.message.reply_photo(IMG + poster, caption=caption,
+                                    parse_mode="Markdown", reply_markup=kb)
+    else:
+        await u.message.reply_text(caption, parse_mode="Markdown", reply_markup=kb)
+
 def main():
     app = Application.builder().token(os.environ["TELEGRAM_BOT_TOKEN"]).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("find", find))
-    logging.info("Bot started and polling...")
+    logging.info("Bot polling...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
-    threading.Thread(target=run_health_server, daemon=True).start()
+    threading.Thread(target=health, daemon=True).start()
     while True:
-        try:
-            main()
+        try: main()
         except Exception as e:
-            logging.error(f"Bot crashed: {e} — restarting in 10s")
-            time.sleep(10)
+            logging.error(f"crash: {e}"); time.sleep(10)
