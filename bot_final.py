@@ -1,7 +1,6 @@
 import os
 import re
 import html
-import time
 import hashlib
 import asyncio
 import logging
@@ -74,7 +73,7 @@ async def archive_search(
     sort: str = "downloads desc",
 ) -> dict[str, Any]:
     """Search archive.org for feature-length movies."""
-    # FIX: Archive.org uses SECONDS for runtime. 1800s = 30 mins, 14400s = 4 hours.
+    # Archive.org uses SECONDS for runtime. 1800s = 30 mins, 14400s = 4 hours.
     # This perfectly filters out shorts, clips, and trailers.
     quality_query = f'({query}) AND mediatype:(movies) AND runtime:[1800 TO 14400]'
     
@@ -591,10 +590,4 @@ def main():
 
 if __name__ == "__main__":
     threading.Thread(target=run_health_server, daemon=True).start()
-    # Crash-recovery loop
-    while True:
-        try:
-            main()
-        except Exception as e:
-            log.error(f"Bot crashed: {e} — restarting in 10s")
-            time.sleep(10)
+    main()
