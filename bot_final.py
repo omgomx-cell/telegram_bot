@@ -73,9 +73,10 @@ async def archive_search(
     rows: int = RESULTS_PER_PAGE,
     sort: str = "downloads desc",
 ) -> dict[str, Any]:
-    """Search archive.org for high-quality, feature-length movies."""
-    # Filter: mediatype movies, runtime 30-400 mins (filters out clips/trailers), and HD formats
-    quality_query = f'({query}) AND mediatype:(movies) AND runtime:[30 TO 400] AND format:(MPEG4 OR h.264 OR 720p OR 1080p)'
+    """Search archive.org for feature-length movies."""
+    # FIX: Archive.org uses SECONDS for runtime. 1800s = 30 mins, 14400s = 4 hours.
+    # This perfectly filters out shorts, clips, and trailers.
+    quality_query = f'({query}) AND mediatype:(movies) AND runtime:[1800 TO 14400]'
     
     params = {
         "q": quality_query,
@@ -149,7 +150,7 @@ def format_movie_card(doc: dict) -> str:
 
 def build_results_keyboard(docs: list[dict], query: str, page: int, total: int) -> InlineKeyboardMarkup:
     buttons = []
-    token = cache_query(query) # Use cache to prevent truncation issues
+    token = cache_query(query)
     
     for d in docs:
         title = d.get("title", "Untitled")[:45]
@@ -221,7 +222,6 @@ async def cmd_find(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     try:
         async with aiohttp.ClientSession() as session:
-            # FIX: Pass 'query' directly, do NOT wrap in title:()
             data = await archive_search(session, query, page=0, rows=RESULTS_PER_PAGE)
     except Exception as e:
         log.error(f"Search error: {e}")
@@ -408,11 +408,16 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # ── Find Similar (by runtime) ──
     if data.startswith("similar:"):
-        runtime = data[8:]
-        msg_text = "🧩 Finding similar movies..."
-        await query.edit_message_text(msg_text)
+        runtime_str = data[8:]
+        await query.edit_message_text("🧩 Finding similar length movies...")
         
-        query_str = f'runtime:{runtime}'
+        try:
+            rt_val = int(runtime_str)
+            # Search for movies within +/- 5 minutes (300 seconds) of the runtime
+            query_str = f'runtime:[{rt_val - 300} TO {rt_val + 300}]'
+        except ValueError:
+            return await query.edit_message_text("⚠️ Invalid runtime.")
+            
         try:
             async with aiohttp.ClientSession() as session:
                 result = await archive_search(session, query_str, page=0, rows=RESULTS_PER_PAGE, sort="downloads desc")
@@ -426,7 +431,7 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return await query.edit_message_text("😕 No similar length movies found.")
             
         keyboard = build_results_keyboard(docs, query_str, 0, min(total, MAX_RESULTS))
-        text_lines = [f"🧩 <b>Movies ~{runtime} mins long</b>\n"]
+        text_lines = [f"🧩 <b>Movies of similar length</b>\n"]
         for i, d in enumerate(docs, 1):
             title = html.escape(d.get("title", "Untitled"))
             year = d.get("year", "")
@@ -474,7 +479,7 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         mp4s = find_mp4_files(meta)
         buttons = []
         if mp4s:
-            # Only show the top 2 largest files (usually the HD versions)
+            # Show the top 2 largest files (usually the HD versions)
             for mp4 in mp4s[:2]:  
                 url = f"https://archive.org/download/{identifier}/{mp4['name']}"
                 label = f"⬇️ High Quality ({mp4['size']})"
@@ -521,7 +526,6 @@ async def on_inline(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     try:
         async with aiohttp.ClientSession() as session:
-            # FIX: Pass 'query_text' directly, do NOT wrap in title:()
             data = await archive_search(session, query_text, page=0, rows=RESULTS_PER_PAGE)
             docs = data.get("response", {}).get("docs", [])
     except Exception as e:
@@ -587,7 +591,7 @@ def main():
 
 if __name__ == "__main__":
     threading.Thread(target=run_health_server, daemon=True).start()
-    # Restored crash-recovery loop
+    # Crash-recovery loop
     while True:
         try:
             main()
